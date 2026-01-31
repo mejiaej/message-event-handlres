@@ -1,9 +1,32 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { eventBus } from '../EventBus.js';
+import type { MessageReceivedEvent, MessageStoredEvent, MessageRejectedEvent, MessageReceivedPayload, MessageStoredPayload, MessageRejectedPayload, Event } from '../Event.types.js';
 
-const MESSAGE_RECIEVED_EVENT = "MessageReceived";
-const MESSAGE_STORED_EVENT = "MessageStored";
-const MESSAGE_REJECTED_EVENT = "MessageRejected";
+// Helper function to create structured events
+function createMessageReceivedEvent(content: string): MessageReceivedEvent {
+  return {
+    eventId: crypto.randomUUID(),
+    type: 'MessageReceived',
+    timestamp: new Date().toISOString(),
+    payload: {
+      messageId: crypto.randomUUID(),
+      sender: 'test@example.com',
+      recipient: 'recipient@example.com',
+      content
+    }
+  };
+}
+
+function createMessageStoredEvent(messageId: string): MessageStoredEvent {
+  return {
+    eventId: crypto.randomUUID(),
+    type: 'MessageStored',
+    timestamp: new Date().toISOString(),
+    payload: {
+      messageId
+    }
+  };
+}
 
 describe('EventBus', () => {
   let mockHandler: ReturnType<typeof vi.fn>;
@@ -19,94 +42,139 @@ describe('EventBus', () => {
     }
   });
 
-  it('should publish and receive MESSAGE_RECIEVED_EVENT', () => {
-    const testMessage = "Hello, World!";
+  it('should publish and receive MessageReceived events with proper structure', () => {
+    const testContent = "Hello, World!";
+    const event = createMessageReceivedEvent(testContent);
     
-    // Subscribe to the event
-    unsubscribe = eventBus.subscribe<string>(MESSAGE_RECIEVED_EVENT, mockHandler);
+    // Subscribe to the event with proper Event type handler
+    unsubscribe = eventBus.subscribeToEvent('MessageReceived', (receivedEvent: Event) => {
+      mockHandler(receivedEvent);
+    });
     
     // Publish the event
-    eventBus.publish(MESSAGE_RECIEVED_EVENT, testMessage);
+    eventBus.publishEvent(event);
     
-    // Assert the handler was called with correct data
+    // Assert the handler was called once with correct event structure
     expect(mockHandler).toHaveBeenCalledTimes(1);
-    expect(mockHandler).toHaveBeenCalledWith(testMessage);
+    const receivedEvent = mockHandler.mock.calls[0]?.[0] as MessageReceivedEvent;
+    
+    // Verify event structure
+    expect(receivedEvent.type).toBe('MessageReceived');
+    expect(receivedEvent.eventId).toBeTruthy();
+    expect(receivedEvent.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+    expect(receivedEvent.payload.content).toBe(testContent);
+    expect(receivedEvent.payload.messageId).toBeTruthy();
+    expect(receivedEvent.payload.sender).toBe('test@example.com');
+    expect(receivedEvent.payload.recipient).toBe('recipient@example.com');
   });
 
-  it('should handle multiple subscribers to MESSAGE_RECIEVED_EVENT', () => {
-    const testMessage = "Multiple subscribers test";
+  it('should deliver the same event to multiple subscribers', () => {
+    const testContent = "Multiple subscribers test";
+    const event = createMessageReceivedEvent(testContent);
     const mockHandler2 = vi.fn();
     
-    // Subscribe multiple handlers
-    const unsub1 = eventBus.subscribe<string>(MESSAGE_RECIEVED_EVENT, mockHandler);
-    const unsub2 = eventBus.subscribe<string>(MESSAGE_RECIEVED_EVENT, mockHandler2);
+    // Subscribe multiple handlers with proper Event type handlers
+    const unsub1 = eventBus.subscribeToEvent('MessageReceived', (receivedEvent: Event) => {
+      mockHandler(receivedEvent);
+    });
+    const unsub2 = eventBus.subscribeToEvent('MessageReceived', (receivedEvent: Event) => {
+      mockHandler2(receivedEvent);
+    });
     
     // Publish the event
-    eventBus.publish(MESSAGE_RECIEVED_EVENT, testMessage);
+    eventBus.publishEvent(event);
     
-    // Assert both handlers were called
-    expect(mockHandler).toHaveBeenCalledWith(testMessage);
-    expect(mockHandler2).toHaveBeenCalledWith(testMessage);
+    // Assert both handlers received the same event
+    expect(mockHandler).toHaveBeenCalledTimes(1);
+    expect(mockHandler2).toHaveBeenCalledTimes(1);
+    
+    const receivedEvent1 = mockHandler.mock.calls[0]?.[0] as MessageReceivedEvent;
+    const receivedEvent2 = mockHandler2.mock.calls[0]?.[0] as MessageReceivedEvent;
+    
+    // Both should receive identical event objects
+    expect(receivedEvent1).toEqual(receivedEvent2);
+    expect(receivedEvent1.payload.content).toBe(testContent);
     
     // Clean up
     unsub1();
     unsub2();
   });
 
-  it('should unsubscribe properly from MESSAGE_RECIEVED_EVENT', () => {
-    const testMessage = "Unsubscribe test";
+  it('should unsubscribe properly from MessageReceived events', () => {
+    const testContent = "Unsubscribe test";
+    const event = createMessageReceivedEvent(testContent);
     
-    // Subscribe and immediately unsubscribe
-    unsubscribe = eventBus.subscribe<string>(MESSAGE_RECIEVED_EVENT, mockHandler);
+    // Subscribe and immediately unsubscribe with proper Event handler
+    unsubscribe = eventBus.subscribeToEvent('MessageReceived', (receivedEvent: Event) => {
+      mockHandler(receivedEvent);
+    });
     unsubscribe();
     
     // Publish the event
-    eventBus.publish(MESSAGE_RECIEVED_EVENT, testMessage);
+    eventBus.publishEvent(event);
     
     // Assert the handler was not called
     expect(mockHandler).not.toHaveBeenCalled();
   });
 
-  it('should handle different event types', () => {
+  it('should maintain event type isolation', () => {
     const messageHandler = vi.fn();
     const storedHandler = vi.fn();
     
-    // Subscribe to different events
-    const unsubMessage = eventBus.subscribe<string>(MESSAGE_RECIEVED_EVENT, messageHandler);
-    const unsubStored = eventBus.subscribe<string>(MESSAGE_STORED_EVENT, storedHandler);
+    const receivedEvent = createMessageReceivedEvent("test message");
     
-    // Publish MESSAGE_RECIEVED_EVENT
-    eventBus.publish(MESSAGE_RECIEVED_EVENT, "received message");
+    // Subscribe to different event types with proper Event handlers
+    const unsubMessage = eventBus.subscribeToEvent('MessageReceived', (event: Event) => {
+      messageHandler(event);
+    });
+    const unsubStored = eventBus.subscribeToEvent('MessageStored', (event: Event) => {
+      storedHandler(event);
+    });
     
-    // Only the message handler should be called
-    expect(messageHandler).toHaveBeenCalledWith("received message");
+    // Publish MessageReceived event
+    eventBus.publishEvent(receivedEvent);
+    
+    // Only the MessageReceived handler should be called
+    expect(messageHandler).toHaveBeenCalledTimes(1);
     expect(storedHandler).not.toHaveBeenCalled();
+    
+    // Verify the received event structure
+    const receivedEventArg = messageHandler.mock.calls[0]?.[0] as MessageReceivedEvent;
+    expect(receivedEventArg.type).toBe('MessageReceived');
+    expect(receivedEventArg).toEqual(receivedEvent);
     
     // Clean up
     unsubMessage();
     unsubStored();
   });
 
-  it('should handle complex payload types', () => {
-    interface MessagePayload {
-      id: string;
-      content: string;
-      timestamp: Date;
-      sender: string;
-    }
-    
-    const complexPayload: MessagePayload = {
-      id: "msg-123",
+  it('should handle structured message payload correctly', () => {
+    const complexPayload: MessageReceivedPayload = {
+      messageId: "msg-123",
       content: "Complex message content",
-      timestamp: new Date(),
-      sender: "user@example.com"
+      sender: "user@example.com",
+      recipient: "recipient@example.com"
     };
     
-    const complexHandler = vi.fn();
-    unsubscribe = eventBus.subscribe<MessagePayload>(MESSAGE_RECIEVED_EVENT, complexHandler);
+    const event: MessageReceivedEvent = {
+      eventId: "event-456",
+      type: 'MessageReceived',
+      timestamp: "2026-01-31T10:00:00.000Z",
+      payload: complexPayload
+    };
     
-    eventBus.publish(MESSAGE_RECIEVED_EVENT, complexPayload);
+    unsubscribe = eventBus.subscribeToEvent('MessageReceived', (receivedEvent: Event) => {
+      mockHandler(receivedEvent);
+    });
+    eventBus.publishEvent(event);
     
-    expect(complexHandler).toHaveBeenCalledWith(complexPayload);
+    expect(mockHandler).toHaveBeenCalledTimes(1);
+    const receivedEvent = mockHandler.mock.calls[0]?.[0] as MessageReceivedEvent;
+    
+    // Verify complete event structure is preserved
+    expect(receivedEvent).toEqual(event);
+    expect(receivedEvent.eventId).toBe("event-456");
+    expect(receivedEvent.timestamp).toBe("2026-01-31T10:00:00.000Z");
+    expect(receivedEvent.payload).toEqual(complexPayload);
   });
 });

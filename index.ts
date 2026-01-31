@@ -1,9 +1,6 @@
+import { MESSAGE_RECEIVED_EVENT, type MessageReceivedEvent } from "./src/Event.types.js";
 import { eventBus } from "./src/EventBus.js";
+import { handleMessageReceived } from "./src/event-handlers/MessageRecievedHandler.js";
 
-const MESSAGE_RECIEVED_EVENT = "MessageReceived";
-const MESSAGE_STORED_EVENT = "MessageStored";
-const MESSAGE_REJECTED_EVENT = "MessageRejected";
-
-eventBus.subscribe<string>(MESSAGE_RECIEVED_EVENT, (message) => {
-  console.log("Received message:", message);
-});
+// Subscribe to MessageReceived events using the handler function
+eventBus.subscribeToEvent(MESSAGE_RECEIVED_EVENT, handleMessageReceived);

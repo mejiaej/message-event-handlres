@@ -1,18 +1,25 @@
 import { EventEmitter } from 'events';
-
-type EventHandler<T = any> = (payload: T) => void;
+import type {
+  Event,
+  EventType,
+} from './Event.types.js';
 
 class EventBus {
   private emitter = new EventEmitter();
 
-  publish<T>(eventName: string, payload: T): void {
-    this.emitter.emit(eventName, payload);
+  // New structured event methods
+  publishEvent(event: Event): void {
+    this.emitter.emit(event.type, event);
   }
 
-  subscribe<T>(eventName: string, handler: EventHandler<T>): () => void {
-    this.emitter.on(eventName, handler);
-    return () => this.emitter.off(eventName, handler);
+  subscribeToEvent<T extends EventType>(
+    eventType: T,
+    handler: (event: Event & { type: T }) => void
+  ): () => void {
+    this.emitter.on(eventType, handler);
+    return () => this.emitter.off(eventType, handler);
   }
+
 }
 
 export const eventBus = new EventBus();
