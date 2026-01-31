@@ -29,7 +29,7 @@ export async function handleMessageReceived(event: MessageReceivedEvent): Promis
 
     // Only store if validation passed and message doesn't exist
     await storeMessage(payload);
-    publishMessageStoredEvent(messageId);
+    publishMessageStoredEvent(messageId, eventId);
     
   } catch (error) {
     console.error(`Error processing message ${messageId}:`, error);
@@ -111,10 +111,12 @@ async function storeMessage(payload: MessageReceivedPayload): Promise<void> {
 /**
  * Publish a MessageStored event to indicate successful processing
  * @param messageId - The ID of the successfully processed message
+ * @param originalEventId - The ID of the original MessageReceived event
  */
-function publishMessageStoredEvent(messageId: string): void {
+function publishMessageStoredEvent(messageId: string, originalEventId: string): void {
   const messageStoredEvent = {
     eventId: crypto.randomUUID(),
+    originalEventId,
     type: 'MessageStored' as const,
     timestamp: new Date().toISOString(),
     payload: {

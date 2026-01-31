@@ -2,8 +2,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { DataSource } from 'typeorm';
 import { eventBus } from '../EventBus.js';
 import { handleMessageReceived } from '../event-handlers/MessageRecievedHandler.js';
+import { handleMessageStored } from '../event-handlers/MessageStoredHandler.js';
+import { handleMessageRejected } from '../event-handlers/MessageRejectedHandler.js';
 import { Message } from '../entities/Message.js';
-import type { MessageReceivedEvent } from '../Event.types.js';
+import type { MessageReceivedEvent, MessageStoredEvent, MessageRejectedEvent } from '../Event.types.js';
 
 // Create test DataSource
 let testDataSource: DataSource;
@@ -155,5 +157,137 @@ describe('Message Storage Integration Tests', () => {
     expect(messagesWithThisId).toHaveLength(1);
     expect(messagesWithThisId[0]?.messageId).toBe(messageId);
     expect(messagesWithThisId[0]?.sender).toBe('idempotent-test@example.com');
+  });
+
+  describe('Event Tracing Tests', () => {
+    it('should publish MessageStored event with correct originalEventId when message is successfully processed', async () => {
+      const messageStoredSpy = vi.fn();
+      const messageStoredUnsubscribe = eventBus.subscribeToEvent('MessageStored', messageStoredSpy);
+
+      const messageEvent: MessageReceivedEvent = {
+        eventId: 'trace-test-stored-' + crypto.randomUUID(),
+        type: 'MessageReceived',
+        timestamp: new Date().toISOString(),
+        payload: {
+          messageId: 'msg-' + crypto.randomUUID(),
+          sender: 'trace-test@example.com',
+          recipient: 'recipient@example.com',
+          content: 'Message for tracing stored event'
+        }
+      };
+
+      // Process the message
+      eventBus.publishEvent(messageEvent);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify MessageStored event was published with correct originalEventId
+      expect(messageStoredSpy).toHaveBeenCalledTimes(1);
+      const storedEvent = messageStoredSpy.mock.calls[0]?.[0] as MessageStoredEvent;
+      expect(storedEvent.originalEventId).toBe(messageEvent.eventId);
+      expect(storedEvent.payload.messageId).toBe(messageEvent.payload.messageId);
+      expect(storedEvent.type).toBe('MessageStored');
+
+      messageStoredUnsubscribe();
+    });
+
+    it('should publish MessageRejected event with correct originalEventId when message validation fails', async () => {
+      const messageRejectedSpy = vi.fn();
+      const messageRejectedUnsubscribe = eventBus.subscribeToEvent('MessageRejected', messageRejectedSpy);
+
+      const invalidMessageEvent: MessageReceivedEvent = {
+        eventId: 'trace-test-rejected-' + crypto.randomUUID(),
+        type: 'MessageReceived',
+        timestamp: new Date().toISOString(),
+        payload: {
+          messageId: '', // Invalid: empty messageId
+          sender: 'trace-test@example.com',
+          recipient: 'recipient@example.com',
+          content: 'This message should be rejected due to empty messageId'
+        }
+      };
+
+      // Process the invalid message
+      eventBus.publishEvent(invalidMessageEvent);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify MessageRejected event was published with correct originalEventId
+      expect(messageRejectedSpy).toHaveBeenCalledTimes(1);
+      const rejectedEvent = messageRejectedSpy.mock.calls[0]?.[0] as MessageRejectedEvent;
+      expect(rejectedEvent.originalEventId).toBe(invalidMessageEvent.eventId);
+      expect(rejectedEvent.payload.messageId).toBe(invalidMessageEvent.payload.messageId);
+      expect(rejectedEvent.payload.reason).toContain('Message ID cannot be empty');
+      expect(rejectedEvent.type).toBe('MessageRejected');
+
+      messageRejectedUnsubscribe();
+    });
+
+    it('should handle MessageStored events with proper logging', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const messageStoredUnsubscribe = eventBus.subscribeToEvent('MessageStored', handleMessageStored);
+
+      const messageEvent: MessageReceivedEvent = {
+        eventId: 'log-test-stored-' + crypto.randomUUID(),
+        type: 'MessageReceived',
+        timestamp: new Date().toISOString(),
+        payload: {
+          messageId: 'msg-log-' + crypto.randomUUID(),
+          sender: 'log-test@example.com',
+          recipient: 'recipient@example.com',
+          content: 'Message for logging test'
+        }
+      };
+
+      // Process the message
+      eventBus.publishEvent(messageEvent);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify the MessageStored handler logged the event with the right pattern
+      const messageStoredLogCall = consoleSpy.mock.calls.find(call => 
+        call[0]?.includes && call[0].includes('MessageStored event:')
+      );
+      expect(messageStoredLogCall).toBeDefined();
+      expect(messageStoredLogCall?.[1]).toEqual(expect.objectContaining({
+        originalEventId: messageEvent.eventId,
+        messageId: messageEvent.payload.messageId
+      }));
+
+      messageStoredUnsubscribe();
+      consoleSpy.mockRestore();
+    });
+
+    it('should handle MessageRejected events with proper logging', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const messageRejectedUnsubscribe = eventBus.subscribeToEvent('MessageRejected', handleMessageRejected);
+
+      const invalidMessageEvent: MessageReceivedEvent = {
+        eventId: 'log-test-rejected-' + crypto.randomUUID(),
+        type: 'MessageReceived',
+        timestamp: new Date().toISOString(),
+        payload: {
+          messageId: '', // Invalid: empty messageId
+          sender: 'log-test@example.com',
+          recipient: 'recipient@example.com',
+          content: 'This message should be rejected'
+        }
+      };
+
+      // Process the invalid message
+      eventBus.publishEvent(invalidMessageEvent);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify the MessageRejected handler logged the event with the right pattern
+      const messageRejectedLogCall = consoleSpy.mock.calls.find(call => 
+        call[0]?.includes && call[0].includes('MessageRejected event:')
+      );
+      expect(messageRejectedLogCall).toBeDefined();
+      expect(messageRejectedLogCall?.[1]).toEqual(expect.objectContaining({
+        originalEventId: invalidMessageEvent.eventId,
+        messageId: invalidMessageEvent.payload.messageId,
+        reason: expect.stringContaining('Message ID cannot be empty')
+      }));
+
+      messageRejectedUnsubscribe();
+      consoleSpy.mockRestore();
+    });
   });
 });
