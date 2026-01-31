@@ -79,9 +79,11 @@ describe('Message Storage Integration Tests', () => {
 
     // Verify the message was stored in the database
     const messageRepository = testDataSource.getRepository(Message);
-    const storedMessages = await messageRepository.find();
+    const storedMessages = await messageRepository.find({
+      where: { messageId: messageEvent.payload.messageId }
+    });
 
-    // Should have exactly one message
+    // Should have exactly one message with this messageId
     expect(storedMessages).toHaveLength(1);
 
     const storedMessage: Message = storedMessages[0]!;
@@ -121,5 +123,37 @@ describe('Message Storage Integration Tests', () => {
     expect(foundMessage?.messageId).toBe(messageId);
     expect(foundMessage?.sender).toBe('query-test@example.com');
     expect(foundMessage?.content).toBe('This message should be queryable by messageId');
+  });
+
+  it('should be idempotent - processing the same message twice should only store it once', async () => {
+    const messageId = 'idempotent-test-' + crypto.randomUUID();
+    const messageEvent: MessageReceivedEvent = {
+      eventId: crypto.randomUUID(),
+      type: 'MessageReceived',
+      timestamp: new Date().toISOString(),
+      payload: {
+        messageId,
+        sender: 'idempotent-test@example.com',
+        recipient: 'recipient@example.com',
+        content: 'This message should only be stored once even if processed multiple times'
+      }
+    };
+
+    // Process the same message twice
+    eventBus.publishEvent(messageEvent);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    eventBus.publishEvent(messageEvent);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Verify only one message was stored
+    const messageRepository = testDataSource.getRepository(Message);
+    const messagesWithThisId = await messageRepository.find({
+      where: { messageId }
+    });
+
+    expect(messagesWithThisId).toHaveLength(1);
+    expect(messagesWithThisId[0]?.messageId).toBe(messageId);
+    expect(messagesWithThisId[0]?.sender).toBe('idempotent-test@example.com');
   });
 });

@@ -4,7 +4,6 @@ import { AppDataSource } from '../database/dataSource.js';
 import { Message } from '../entities/Message.js';
 
 
-
 /**
  * Handle a MessageReceived event
  * This is the main handler function that processes incoming messages
@@ -19,7 +18,16 @@ export async function handleMessageReceived(event: MessageReceivedEvent): Promis
   });
 
   try {
+    // First validate the message structure - this should always happen
     validateMessagePayload(payload);
+    
+    // Then check for idempotency - if message already exists, skip storage
+    if (await messageAlreadyExists(messageId)) {
+      console.log(`Message ${messageId} already exists in database, skipping processing (idempotent behavior)`);
+      return;
+    }
+
+    // Only store if validation passed and message doesn't exist
     await storeMessage(payload);
     publishMessageStoredEvent(messageId);
     
@@ -31,6 +39,24 @@ export async function handleMessageReceived(event: MessageReceivedEvent): Promis
   }
 }
 
+/**
+ * Check if a message already exists in the database (for idempotency)
+ * @param messageId - The message ID to check
+ * @returns Promise<boolean> - True if message exists, false otherwise
+ */
+async function messageAlreadyExists(messageId: string): Promise<boolean> {
+  try {
+    const messageRepository = AppDataSource.getRepository(Message);
+    const existingMessage = await messageRepository.findOne({
+      where: { messageId }
+    });
+    return existingMessage !== null;
+  } catch (error) {
+    console.error(`Error checking if message ${messageId} exists:`, error);
+    // On database error, assume message doesn't exist to allow processing
+    return false;
+  }
+}
 
 
 /**
