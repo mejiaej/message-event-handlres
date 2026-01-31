@@ -1,5 +1,7 @@
 import { eventBus } from '../EventBus.js';
 import type { MessageReceivedEvent, MessageReceivedPayload } from '../Event.types.js';
+import { AppDataSource } from '../database/dataSource.js';
+import { Message } from '../entities/Message.js';
 
 
 
@@ -8,7 +10,7 @@ import type { MessageReceivedEvent, MessageReceivedPayload } from '../Event.type
  * This is the main handler function that processes incoming messages
  * @param event - The MessageReceived event to process
  */
-export function handleMessageReceived(event: MessageReceivedEvent): void {
+export async function handleMessageReceived(event: MessageReceivedEvent): Promise<void> {
   const { eventId, timestamp, payload } = event;
   const { messageId, sender, recipient, content } = payload;
 
@@ -18,7 +20,7 @@ export function handleMessageReceived(event: MessageReceivedEvent): void {
 
   try {
     validateMessagePayload(payload);
-    storeMessage(payload);
+    await storeMessage(payload);
     publishMessageStoredEvent(messageId);
     
   } catch (error) {
@@ -56,18 +58,28 @@ function validateMessagePayload(payload: MessageReceivedPayload): void {
 }
 
 /**
- * Store the message - customize this function for your business logic
+ * Store the message - saves to SQLite database using TypeORM
  * @param payload - The message payload to store
  */
-function storeMessage(payload: MessageReceivedPayload): void {
-  console.log(`Storing message ${payload.messageId} from ${payload.sender} to ${payload.recipient}: "${payload.content}"`);
-  
-  // TODO: Add your custom message storage logic here
-  // Examples:
-  // - Save to database
-  // - Store in file system
-  // - Send to external service
-  // - Cache in memory
+async function storeMessage(payload: MessageReceivedPayload): Promise<void> {
+  try {
+    const messageRepository = AppDataSource.getRepository(Message);
+    
+    // Create a new message entity
+    const message = new Message();
+    message.messageId = payload.messageId;
+    message.sender = payload.sender;
+    message.recipient = payload.recipient;
+    message.content = payload.content;
+    
+    // Save to database
+    await messageRepository.save(message);
+    
+    console.log(`Successfully stored message ${payload.messageId} in database`);
+  } catch (error) {
+    console.error(`Failed to store message ${payload.messageId}:`, error);
+    throw new Error(`Database storage failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 /**

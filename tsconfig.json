@@ -33,6 +33,10 @@
     // "noFallthroughCasesInSwitch": true,
     // "noPropertyAccessFromIndexSignature": true,
 
+    // TypeORM Decorator Support
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
     // Recommended Options
     "strict": true,
     "jsx": "react-jsx",

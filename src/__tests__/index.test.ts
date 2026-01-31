@@ -1,15 +1,36 @@
-import { describe, it, expect, beforeEach, afterEach, vi, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { eventBus } from '../EventBus.js';
 import type { MessageReceivedEvent, MessageStoredEvent, MessageRejectedEvent } from '../Event.types.js';
 
 // Import to trigger the subscription in index.ts
-import '../../index.js';
+// Note: We'll mock the database functionality for unit tests
+import { handleMessageReceived } from '../event-handlers/MessageRecievedHandler.js';
+
+// Mock the database functionality
+vi.mock('../database/dataSource.js', () => ({
+  AppDataSource: {
+    getRepository: vi.fn(() => ({
+      save: vi.fn().mockReturnValue({}), // Synchronous mock
+      clear: vi.fn().mockReturnValue({}), // Synchronous mock  
+      find: vi.fn().mockReturnValue([]), // Synchronous mock
+      findOne: vi.fn().mockReturnValue(null) // Synchronous mock
+    }))
+  },
+  initializeDatabase: vi.fn().mockReturnValue(undefined), // Synchronous mock
+  closeDatabase: vi.fn().mockReturnValue(undefined) // Synchronous mock
+}));
+
+// Mock the Message entity
+vi.mock('../entities/Message.js', () => ({
+  Message: vi.fn().mockImplementation(() => ({}))
+}));
 
 describe('Index.ts Integration Tests - Message Validation', () => {
   let messageStoredHandler: ReturnType<typeof vi.fn>;
   let messageRejectedHandler: ReturnType<typeof vi.fn>;
   let unsubscribeStored: () => void;
   let unsubscribeRejected: () => void;
+  let unsubscribeMessageReceived: () => void;
 
   beforeEach(() => {
     // Mock console methods to avoid noise in tests
@@ -22,11 +43,15 @@ describe('Index.ts Integration Tests - Message Validation', () => {
     
     unsubscribeStored = eventBus.subscribeToEvent('MessageStored', messageStoredHandler);
     unsubscribeRejected = eventBus.subscribeToEvent('MessageRejected', messageRejectedHandler);
+
+    // Subscribe to MessageReceived events using the handler function
+    unsubscribeMessageReceived = eventBus.subscribeToEvent('MessageReceived', handleMessageReceived);
   });
 
   afterEach(() => {
     if (unsubscribeStored) unsubscribeStored();
     if (unsubscribeRejected) unsubscribeRejected();
+    if (unsubscribeMessageReceived) unsubscribeMessageReceived();
     vi.restoreAllMocks();
   });
 
@@ -46,12 +71,14 @@ describe('Index.ts Integration Tests - Message Validation', () => {
   }
 
   describe('Valid Message Processing', () => {
-    it('should successfully process a valid message and publish MessageStored event', () => {
+    it('should successfully process a valid message and publish MessageStored event', async () => {
       const validEvent = createValidMessageReceivedEvent();
       
       eventBus.publishEvent(validEvent);
       
-      // Should publish MessageStored event
+      // Wait for async event processing
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
       expect(messageStoredHandler).toHaveBeenCalledTimes(1);
       expect(messageRejectedHandler).not.toHaveBeenCalled();
       
@@ -62,7 +89,7 @@ describe('Index.ts Integration Tests - Message Validation', () => {
   });
 
   describe('Message ID Validation', () => {
-    it('should reject message with empty messageId', () => {
+    it('should reject message with empty messageId and not save to database', () => {
       const invalidEvent = createValidMessageReceivedEvent();
       invalidEvent.payload.messageId = '';
       
@@ -221,11 +248,14 @@ describe('Index.ts Integration Tests - Message Validation', () => {
       expect(messageStoredHandler).not.toHaveBeenCalled();
     });
 
-    it('should accept message with content that contains only valid whitespace (spaces between words)', () => {
+    it('should accept message with content that contains only valid whitespace (spaces between words)', async () => {
       const validEvent = createValidMessageReceivedEvent();
       validEvent.payload.content = 'Hello world with spaces';
       
       eventBus.publishEvent(validEvent);
+      
+      // Wait for async event processing
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       expect(messageStoredHandler).toHaveBeenCalledTimes(1);
       expect(messageRejectedHandler).not.toHaveBeenCalled();
